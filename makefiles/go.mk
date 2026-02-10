@@ -11,7 +11,7 @@ GOCOV_VERSION ?= v1.1.0
 GOCOV_HTML_VERSION ?= v1.4.0
 
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.34
+ENVTEST_K8S_VERSION = 1.33
 
 GOTESTPKG ?= ./...
 

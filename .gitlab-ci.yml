@@ -146,7 +146,7 @@ e2e-test:
     APISERVER_KEY_LOCATION: "/Users/master/.fleet/fleetd/volumes/kubelet/tls.key"
     VZ_SSH_USER: "master"
     E2E_MACOS_IMAGE: "localhost:5000/macos:latest"
-    E2E_MACOS_IMAGE_DIR: "/Users/master/Library/Caches/com.agoda.fleet.virtualization/blobs/macos-sonoma-runner/15.0.1/"
+    E2E_MACOS_IMAGE_DIR: "/Users/master/Library/Caches/com.thesis.virtualization/blobs/macos-sonoma-runner/15.0.1/"
     BUSYBOX_IMAGE: "busybox:1.37.0"
     DOCKER_SOCKET_PATH: "unix:///Users/master/.colima/docker.sock"
     NODE_NAME: "macos-vz-kubelet-e2e-test-node-$CI_JOB_ID"

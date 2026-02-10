@@ -6,7 +6,7 @@ platform :mac do
   desc "Builds and signs the macOS application using the Developer ID certificate and provisioning profile obtained from match."
   lane :build_snapshot do
     match(
-      app_identifier: 'com.agoda.fleet.virtualization',
+      app_identifier: 'com.thesis.virtualization',
       type: 'developer_id',
       verbose: true
     )
@@ -16,7 +16,7 @@ platform :mac do
   desc "Builds, signs, and releases the macOS application using the Developer ID certificate and provisioning profile obtained from match."
   lane :build_release do
     match(
-      app_identifier: 'com.agoda.fleet.virtualization',
+      app_identifier: 'com.thesis.virtualization',
       type: 'developer_id',
       verbose: true
     )
@@ -27,8 +27,8 @@ end
 def build_and_sign_macos_app(target)
   Fastlane::Actions.execute_action("Build and sign macOS app") do
     # Retrieve the necessary environment variables set by match
-    release_certificate_name = ENV['sigh_com.agoda.fleet.virtualization_developer_id_macos_certificate-name']
-    release_provision_profile_path = ENV['sigh_com.agoda.fleet.virtualization_developer_id_macos_profile-path']
+    release_certificate_name = ENV['sigh_com.thesis.virtualization_developer_id_macos_certificate-name']
+    release_provision_profile_path = ENV['sigh_com.thesis.virtualization_developer_id_macos_profile-path']
 
     # Log the start of the build process
     Fastlane::UI.message("Starting the build process for #{target}...")

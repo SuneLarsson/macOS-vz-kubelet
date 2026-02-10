@@ -245,7 +245,7 @@ All flags listed below are optional.
 
 ### Local cache
 
-The cache directory will be `~/Library/Caches/com.agoda.fleet.virtualization`. Cache includes OCI images and their digest files and pod mount volumes if you use empty_dir volumes.
+The cache directory will be `~/Library/Caches/com.thesis.virtualization`. Cache includes OCI images and their digest files and pod mount volumes if you use empty_dir volumes.
 
 ## Example Workloads
 
