@@ -23,6 +23,7 @@ go.work.sum
 
 # Build directory
 build/
+builds/
 
 # CICD temp files
 .go/
