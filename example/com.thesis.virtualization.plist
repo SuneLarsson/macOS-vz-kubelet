@@ -27,13 +27,13 @@
 	<string>com.thesis.virtualization</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/Users/master/.fleet/bin/kubelet</string>
+		<string>/Users/ubuntu/.thesis/builds/macos-vz-kubelet</string>
 		<string>--authentication-token-webhook</string>
 		<string>true</string>
 		<string>--nodename</string>
 		<string>mac-mini-vm</string>
 		<string>--log-level</string>
-		<string>info</string>
+		<string>debug</string>
 	</array>
 	<key>RunAtLoad</key>
 	<false/>
