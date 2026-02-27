@@ -29,7 +29,7 @@ func ValidateFileWithDigest(ctx context.Context, filePath string, expectedDigest
 	}
 
 	// If the digest file does not exist or the digest file is older than the file, compute and verify the digest manually
-	if isNotExistErr || !digestFileInfo.ModTime().After(fileInfo.ModTime()) {
+	if isNotExistErr || digestFileInfo.ModTime().Before(fileInfo.ModTime()) {
 		log.G(ctx).Warnf("Digest file for %s does not exist or is outdated, computing digest manually", filePath)
 		return ComputeAndVerifyFileDigest(filePath, expectedDigest)
 	}
@@ -52,6 +52,7 @@ func ComputeAndVerifyFileDigest(filePath string, expectedDigest digest.Digest) e
 	if err != nil {
 		return err
 	}
+	defer rd.Close()
 
 	verifier := expectedDigest.Verifier()
 	if _, err := io.Copy(verifier, rd); err != nil {

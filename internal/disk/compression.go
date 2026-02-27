@@ -110,7 +110,9 @@ func DecompressFileWithPath(ctx context.Context, inputFilePath, outputFilePath s
 		return "", err
 	}
 	defer func() {
-		err = errors.Join(err, outputFile.Close())
+		if outputFile != nil {
+			err = errors.Join(err, outputFile.Close())
+		}
 	}()
 
 	err = outputFile.Truncate(uncompressedSize)
@@ -171,6 +173,14 @@ func DecompressFileWithPath(ctx context.Context, inputFilePath, outputFilePath s
 	}
 
 	d = digester.Digest()
+
+	if err := outputFile.Sync(); err != nil {
+		return "", err
+	}
+	if err := outputFile.Close(); err != nil {
+		return "", err
+	}
+	outputFile = nil // protect defer
 
 	// Write the digest to a file as a cache
 	err = writeDigestFile(outputFilePath, d)

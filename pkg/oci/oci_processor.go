@@ -107,12 +107,22 @@ func (s *Store) processRegularContent(ctx context.Context, expected ocispec.Desc
 		return fmt.Errorf("failed to create file: %w", err)
 	}
 	defer func() {
-		err = errors.Join(err, fp.Close())
+		if fp != nil {
+			err = errors.Join(err, fp.Close())
+		}
 	}()
 
 	if err = s.saveFile(ctx, fp, expected, content); err != nil {
 		return fmt.Errorf("failed to save content: %w", err)
 	}
+
+	if err = fp.Sync(); err != nil {
+		return fmt.Errorf("failed to sync file: %w", err)
+	}
+	if err = fp.Close(); err != nil {
+		return fmt.Errorf("failed to close file: %w", err)
+	}
+	fp = nil // protect defer
 
 	// Since file was saved successfully, store the digest and path
 	s.digestToPath.Store(expected.Digest, outputFilePath)
