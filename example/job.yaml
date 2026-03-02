@@ -1,0 +1,49 @@
+# [`example/postStart.yml`](example/postStart.yml:1)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: macos-job
+  namespace: sommarjobb-jupyterlaunch
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      name: macos-job
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+      - name: macos-robot-secret
+      # Use an emptyDir volume that lives only for the lifetime of the pod.
+      # volumes:
+      # - name: poststart-log
+      #   # hostPath:
+      #   #   path: /Users/ubuntu/Library/Logs/com.thesis.virtualization
+      #   emptyDir: {}
+      containers:
+      - name: macos
+        image: registry.researchcloud.internal.ericsson.com/macos-images/macos-thesis:v1
+        imagePullPolicy: IfNotPresent
+        # Keep the container alive long enough to inspect the file.
+        command: ["/bin/zsh", "-c", "sleep 3600"]
+        lifecycle:
+          postStart:
+            exec:
+              # Write the message to a file inside the shared emptyDir.
+              command: ["/bin/sh", "-c", "sudo shutdown -h now"]
+              # command: ["/bin/zsh", "-c", 'echo "Hello World" > /tmp/hello.log']
+        # volumeMounts:
+        # - name: poststart-log
+        #   mountPath: /logs
+        resources:
+          requests:
+            cpu: "4"
+            memory: "6Gi"
+          limits:
+            cpu: "4"
+            memory: "6Gi"
+      tolerations:
+      - key: "virtual-kubelet.io/provider"
+        operator: "Exists"
+        effect: "NoSchedule"
+      nodeSelector:
+        kubernetes.io/os: "darwin"

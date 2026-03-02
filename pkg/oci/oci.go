@@ -231,8 +231,11 @@ func (s *Store) Exists(ctx context.Context, target ocispec.Descriptor) (ok bool,
 	name := target.Annotations[ocispec.AnnotationTitle]
 	filePath := filepath.Join(s.workingDir, name)
 
-	// if the content exists on the disk and is not ignored, validate it
-	if _, err := os.Stat(filePath); err == nil && !s.ignoreExisting && name != "" {
+	// if the content exists on the disk, validate its digest.
+	// Even when ignoreExisting is true (e.g. imagePullPolicy: Always), we still
+	// check the digest so we can skip an unnecessary pull when the local copy
+	// already matches the remote digest.
+	if _, err := os.Stat(filePath); err == nil && name != "" {
 		var isCompressed bool
 		d := target.Digest
 		if uncompressedDigest := target.Annotations[AnnotationUncompressedDigest]; uncompressedDigest != "" {
@@ -241,10 +244,11 @@ func (s *Store) Exists(ctx context.Context, target ocispec.Descriptor) (ok bool,
 		}
 
 		ctx = span.WithFields(ctx, log.Fields{
-			"name":         name,
-			"filePath":     filePath,
-			"isCompressed": isCompressed,
-			"digest":       d,
+			"name":           name,
+			"filePath":       filePath,
+			"isCompressed":   isCompressed,
+			"digest":         d,
+			"ignoreExisting": s.ignoreExisting,
 		})
 
 		// Validate local file with output path with digest
