@@ -1,36 +1,122 @@
 # [`example/postStart.yml`](example/postStart.yml:1)
+---
+# 1. The NFS Server Pod deployed to a normal Linux node.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: macos-nfs-server
+  namespace: default
+  labels:
+    app.kubernetes.io/name: macos-nfs-server
+spec:
+  imagePullSecrets:
+  - name: macos-robot-secret
+  restartPolicy: Never
+  securityContext:
+    runAsUser: 1000
+    fsGroup: 1000
+  containers:
+    - name: nfs-server
+      image: nfs-linux-side:v1
+      env:
+        - name: SHARED_DIRECTORY
+          value: /proj/nfs-share
+      ports:
+        - name: nfs
+          containerPort: 2049
+      volumeMounts:
+        - name: nfs-export
+          mountPath: /proj/nfs-share
+        - name: tmpfs
+          mountPath: /tmp
+        - name: runfs
+          mountPath: /var/run
+        - name: nfs-state
+          mountPath: /var/lib/nfs
+  volumes:
+    - name: nfs-export
+      emptyDir: {}
+    - name: tmpfs
+      emptyDir: {}
+    - name: runfs
+      emptyDir: {}
+    - name: nfs-state
+      emptyDir: {}
+
+---
+# 2. The Service to expose the NFS Pod
+apiVersion: v1
+kind: Service
+metadata:
+  name: macos-nfs-service
+  namespace: default
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: macos-nfs-server
+  ports:
+    - port: 2049
+      targetPort: 2049
+      nodePort: 32000
+
+---
+# 3. The Mac OS Job.
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: macos-job
-  namespace: sommarjobb-jupyterlaunch
+  namespace: default
 spec:
   backoffLimit: 0
   template:
     metadata:
       name: macos-job
+      annotations:
+        macos-vz-kubelet/nfs-service: "macos-nfs-service"
+        macos-vz-kubelet/nfs-mount-path: "/proj/nfs-share"
     spec:
       restartPolicy: Never
       imagePullSecrets:
       - name: macos-robot-secret
-      # Use an emptyDir volume that lives only for the lifetime of the pod.
-      # volumes:
-      # - name: poststart-log
-      #   # hostPath:
-      #   #   path: /Users/ubuntu/Library/Logs/com.thesis.virtualization
-      #   emptyDir: {}
       containers:
       - name: macos
-        image: registry.researchcloud.internal.ericsson.com/macos-images/macos-thesis:v1
+        image: macos-guest:v1
         imagePullPolicy: IfNotPresent
         # Keep the container alive long enough to inspect the file.
         command: ["/bin/zsh", "-c", "sleep 3600"]
         lifecycle:
           postStart:
-            exec:
-              # Write the message to a file inside the shared emptyDir.
-              command: ["/bin/sh", "-c", "sudo shutdown -h now"]
-              # command: ["/bin/zsh", "-c", 'echo "Hello World" > /tmp/hello.log']
+             exec:
+               command: 
+                 - "/bin/zsh"
+                 - "-c"
+                 - |
+                   NFS_DIR="/Volumes/My Shared Files/nfs-share"
+                   
+                   echo "=== NFS Mount Test ==="
+                   sleep 2 # Wait for automount to settle
+
+                   echo "1. Checking directory..."
+                   if [ -d "$NFS_DIR" ]; then
+                     echo "   PASS: Directory found at $NFS_DIR"
+                   else
+                     echo "   FAIL: No mount found at $NFS_DIR"
+                     exit 1
+                   fi
+
+                   echo "2. Listing contents..."
+                   ls -la "$NFS_DIR"
+
+                   TEST_FILE="$NFS_DIR/mac_test_$(date +%s).txt"
+                   echo "3. Writing test file $TEST_FILE..."
+                   echo "Hello from macOS VZ at $(date)" > "$TEST_FILE"
+                   
+                   echo "4. Reading back..."
+                   CONTENT=$(cat "$TEST_FILE")
+                   echo "   Content: $CONTENT"
+
+                   rm -f "$TEST_FILE"
+                   echo "=== All NFS tests PASSED ==="
         # volumeMounts:
         # - name: poststart-log
         #   mountPath: /logs
