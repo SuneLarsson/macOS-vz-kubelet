@@ -91,10 +91,15 @@ spec:
                  - "/bin/zsh"
                  - "-c"
                  - |
-                   NFS_DIR="/Volumes/My Shared Files/nfs-share"
+                   NFS_DIR="/proj/nfs-share"
                    
                    echo "=== NFS Mount Test ==="
-                   sleep 2 # Wait for automount to settle
+                   
+                   echo "0. Mounting NFS share statically via VM OS..."
+                   sudo mkdir -p "$NFS_DIR"
+                   sudo mount -t nfs -o vers=4,port=$NFS_NODEPORT,noresvport,noowners,rw $NFS_SERVER_IP:/ "$NFS_DIR"
+                   
+                   sleep 2 # Wait for network mount to settle
 
                    echo "1. Checking directory..."
                    if [ -d "$NFS_DIR" ]; then

@@ -99,37 +99,23 @@ func (p *MacOSVZProvider) CreatePod(ctx context.Context, pod *corev1.Pod) (err e
 	}()
 	log.G(ctx).Debug("Received CreatePod request")
 
-	// Check for NFS annotations and perform mount if needed
+	// Check for NFS annotations and perform service discovery if needed
 	if nfsSvc, ok := pod.Annotations["macos-vz-kubelet/nfs-service"]; ok {
-		nfsPath, hasPath := pod.Annotations["macos-vz-kubelet/nfs-mount-path"]
-		if !hasPath {
-			return fmt.Errorf("missing macos-vz-kubelet/nfs-mount-path annotation")
-		}
-
 		pod = pod.DeepCopy()
 
-		localPath, err := mountNFS(ctx, p.k8sClient, pod.Namespace, pod.Name, nfsSvc)
+		targetIP, nodePort, err := DiscoverNFSEndpoint(ctx, p.k8sClient, pod.Namespace, nfsSvc)
 		if err != nil {
-			return fmt.Errorf("failed to mount NFS: %w", err)
+			return fmt.Errorf("failed to discover NFS endpoint: %w", err)
 		}
 
-		// Inject the HostPath volume directly into the virtual machine's Pod Spec
-		hostPathType := corev1.HostPathDirectoryOrCreate
-		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
-			Name: "nfs-mount",
-			VolumeSource: corev1.VolumeSource{
-				HostPath: &corev1.HostPathVolumeSource{
-					Path: localPath,
-					Type: &hostPathType,
-				},
-			},
-		})
-
-		// Mount it to the macOS container (always the first container in our VZ assumption)
+		// Inject the NFS connection variables directly into the first container's environment
 		if len(pod.Spec.Containers) > 0 {
-			pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, corev1.VolumeMount{
-				Name:      "nfs-mount",
-				MountPath: nfsPath,
+			pod.Spec.Containers[0].Env = append(pod.Spec.Containers[0].Env, corev1.EnvVar{
+				Name:  "NFS_SERVER_IP",
+				Value: targetIP,
+			}, corev1.EnvVar{
+				Name:  "NFS_NODEPORT",
+				Value: fmt.Sprintf("%d", nodePort),
 			})
 		}
 	}
@@ -200,14 +186,6 @@ func (p *MacOSVZProvider) handleDeletePod(ctx context.Context, pod *corev1.Pod) 
 	}
 
 	err = p.vzClient.DeleteVirtualizationGroup(ctx, pod.Namespace, pod.Name, gracePeriod)
-	
-	// Best-effort unmount of NFS directory if the pod used it
-	if _, ok := pod.Annotations["macos-vz-kubelet/nfs-service"]; ok {
-		if unmountErr := unmountNFS(ctx, pod.Namespace, pod.Name); unmountErr != nil {
-			log.G(ctx).WithError(unmountErr).Warn("Failed to unmount NFS directory")
-		}
-	}
-
 	if err != nil {
 		log.G(ctx).WithError(err).Error("Failed to delete virtualization group")
 		return
