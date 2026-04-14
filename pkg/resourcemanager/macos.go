@@ -51,6 +51,8 @@ type VirtualMachineParams struct {
 	MemorySize       uint64
 	Mounts           []volumes.Mount
 	Env              []corev1.EnvVar
+	Command          []string
+	Args             []string
 	PostStartAction  *resource.ExecAction
 	IgnoreImageCache bool
 	RegistryCreds    resource.RegistryCredentials
@@ -161,15 +163,23 @@ func (c *MacOSClient) handleVirtualMachineCreation(ctx context.Context, params V
 	}
 	c.eventRecorder.StartedContainer(ctx, params.ContainerName)
 
-	if params.PostStartAction == nil {
-		// No post-start action specified, return early
-		return
+	if params.PostStartAction != nil {
+		// Execute the post-start action
+		err = c.execPostStartAction(ctx, params.Namespace, params.Name, *params.PostStartAction)
+		if err != nil {
+			c.eventRecorder.FailedPostStartHook(ctx, params.ContainerName, params.PostStartAction.Command, err)
+		}
 	}
 
-	// Execute the post-start action
-	err = c.execPostStartAction(ctx, params.Namespace, params.Name, *params.PostStartAction)
-	if err != nil {
-		c.eventRecorder.FailedPostStartHook(ctx, params.ContainerName, params.PostStartAction.Command, err)
+	if len(params.Command) > 0 || len(params.Args) > 0 {
+		// Execute the main container command
+		err = c.execMainCommand(ctx, params.Namespace, params.Name, params.Command, params.Args)
+		if err != nil {
+			c.eventRecorder.FailedToStartContainer(ctx, params.ContainerName, err)
+		} else {
+			// Complete the VM operation so the pod phase changes to completed
+			c.markVirtualMachineCompleted(ctx, params.Namespace, params.Name)
+		}
 	}
 }
 
@@ -250,6 +260,51 @@ func (c *MacOSClient) execPostStartAction(ctx context.Context, namespace, name s
 		return ctx.Err()
 	}
 	return err
+}
+
+// execMainCommand executes the main command inside the virtual machine and waits for it to complete.
+func (c *MacOSClient) execMainCommand(ctx context.Context, namespace, name string, command []string, args []string) (err error) {
+	ctx, span := trace.StartSpan(ctx, "MacOSClient.execMainCommand")
+	ctx = span.WithFields(ctx, log.Fields{
+		"namespace": namespace,
+		"name":      name,
+	})
+	defer func() {
+		span.SetStatus(err)
+		span.End()
+	}()
+	logger := log.G(ctx)
+
+	fullCmd := append([]string{}, command...)
+	fullCmd = append(fullCmd, args...)
+
+	logger.Debugf("Executing main command: %v", fullCmd)
+	logger.Info("Virtual machine is running, executing main command")
+
+	// The main command doesn't use the hard timeout. It runs until it completes or the context is cancelled.
+	err = c.ExecInVirtualMachine(ctx, namespace, name, fullCmd, node.DiscardingExecIO())
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
+}
+
+// markVirtualMachineCompleted stops the virtual machine and sets FinishedAt since the task is completed
+func (c *MacOSClient) markVirtualMachineCompleted(ctx context.Context, namespace, name string) {
+	info, ok := c.data.GetVirtualMachineInfo(namespace, name)
+	if !ok {
+		return
+	}
+
+	if instance := info.Resource.Instance(); instance != nil {
+		// Set finish time
+		now := time.Now()
+		instance.FinishedAt = &now
+		
+		// Stop the instance gracefully. In real kubernetes, the task has finished successfully
+		log.G(ctx).Infof("Main command completed successfully for %s/%s. Shutting down VM instance.", namespace, name)
+		_ = c.stopVirtualMachine(ctx, instance, namespace, name, 0)
+	}
 }
 
 // DeleteVirtualMachine stops and deletes the specified virtual machine.
