@@ -53,10 +53,18 @@ type VirtualMachineParams struct {
 	Env              []corev1.EnvVar
 	Command          []string
 	Args             []string
+	LogPath          string
 	PostStartAction  *resource.ExecAction
 	IgnoreImageCache bool
 	RegistryCreds    resource.RegistryCredentials
 }
+
+// nopCloserWriter wraps an io.Writer so that it ignores close operations natively.
+type nopCloserWriter struct {
+	io.Writer
+}
+
+func (nopCloserWriter) Close() error { return nil }
 
 // MacOSClient manages the lifecycle of macOS virtual machines.
 type MacOSClient struct {
@@ -173,7 +181,7 @@ func (c *MacOSClient) handleVirtualMachineCreation(ctx context.Context, params V
 
 	if len(params.Command) > 0 || len(params.Args) > 0 {
 		// Execute the main container command
-		err = c.execMainCommand(ctx, params.Namespace, params.Name, params.Command, params.Args)
+		err = c.execMainCommand(ctx, params.Namespace, params.Name, params.Command, params.Args, params.LogPath)
 		if err != nil {
 			c.eventRecorder.FailedToStartContainer(ctx, params.ContainerName, err)
 		} else {
@@ -263,7 +271,7 @@ func (c *MacOSClient) execPostStartAction(ctx context.Context, namespace, name s
 }
 
 // execMainCommand executes the main command inside the virtual machine and waits for it to complete.
-func (c *MacOSClient) execMainCommand(ctx context.Context, namespace, name string, command []string, args []string) (err error) {
+func (c *MacOSClient) execMainCommand(ctx context.Context, namespace, name string, command []string, args []string, logPath string) (err error) {
 	ctx, span := trace.StartSpan(ctx, "MacOSClient.execMainCommand")
 	ctx = span.WithFields(ctx, log.Fields{
 		"namespace": namespace,
@@ -281,8 +289,22 @@ func (c *MacOSClient) execMainCommand(ctx context.Context, namespace, name strin
 	logger.Debugf("Executing main command: %v", fullCmd)
 	logger.Info("Virtual machine is running, executing main command")
 
+	var attach api.AttachIO = node.DiscardingExecIO()
+
+	if logPath != "" {
+		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err == nil {
+			defer logFile.Close()
+			// Use our custom writer interface so node.ExecIO doesn't force close the file redundantly
+			logWriter := nopCloserWriter{logFile}
+			attach = node.NewExecIO(false, nil, logWriter, logWriter, nil)
+		} else {
+			logger.WithError(err).Warn("Failed to open log file, falling back to discarding logs.")
+		}
+	}
+
 	// The main command doesn't use the hard timeout. It runs until it completes or the context is cancelled.
-	err = c.ExecInVirtualMachine(ctx, namespace, name, fullCmd, node.DiscardingExecIO())
+	err = c.ExecInVirtualMachine(ctx, namespace, name, fullCmd, attach)
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}

@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -166,6 +167,10 @@ func (c *VzClientAPIs) CreateVirtualizationGroup(ctx context.Context, pod *corev
 			}
 		}
 
+		logDirPath := filepath.Join(c.cachePath, "logs")
+		_ = os.MkdirAll(logDirPath, 0755)
+		logPath := filepath.Join(logDirPath, fmt.Sprintf("%s_%s_%s.log", pod.Namespace, pod.Name, macOSContainer.Name))
+
 		return c.MacOSClient.CreateVirtualMachine(ctx, rm.VirtualMachineParams{
 			UID:              string(pod.UID),
 			Image:            image,
@@ -178,6 +183,7 @@ func (c *VzClientAPIs) CreateVirtualizationGroup(ctx context.Context, pod *corev
 			Env:              macOSContainer.Env,
 			Command:          macOSContainer.Command,
 			Args:             macOSContainer.Args,
+			LogPath:          logPath,
 			PostStartAction:  postStartAction,
 			IgnoreImageCache: pullPolicy == corev1.PullAlways,
 			RegistryCreds:    vmCreds,
@@ -454,7 +460,16 @@ func (c *VzClientAPIs) GetContainerLogs(ctx context.Context, namespace, podName,
 		return c.ContainerClient.GetContainerLogs(ctx, namespace, podName, containerName, opts)
 	}
 
-	return nil, errdefs.InvalidInput("container logs are not supported for macOS virtual machines")
+	logPath := filepath.Join(c.cachePath, "logs", fmt.Sprintf("%s_%s_%s.log", namespace, podName, containerName))
+	f, err := os.Open(logPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, errdefs.NotFound("container logs not found")
+		}
+		return nil, err
+	}
+
+	return f, nil
 }
 
 // ExecuteContainerCommand executes a command inside a specified container.
