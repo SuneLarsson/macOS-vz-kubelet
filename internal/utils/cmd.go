@@ -22,8 +22,13 @@ func BuildExportEnvCommand(env corev1.EnvVar) string {
 	return fmt.Sprintf("export %s=%s\n", env.Name, value)
 }
 
+// shellEscape safely escapes a string to be used as a literal string in a shell command.
+func shellEscape(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
 // BuildExecCommandString returns a shell command that executes the given command in a shell.
-// The command is formatted as "sh -c $'COMMAND'" where COMMAND is the given command string.
+// The command is formatted as "sh -c 'COMMAND'" where COMMAND is the given command string.
 // If the command has arguments, they are appended to the command string.
 func BuildExecCommandString(cmd []string, env []corev1.EnvVar) (string, error) {
 	if len(cmd) < 3 || cmd[1] != "-c" {
@@ -37,12 +42,12 @@ func BuildExecCommandString(cmd []string, env []corev1.EnvVar) (string, error) {
 
 	// If the -c option is present, then commands are read from string.
 	cmdStr += cmd[0] + " " + cmd[1] // e.g. "sh -c"
-	cmdStr += fmt.Sprintf(" $'%s'", cmd[2])
+	cmdStr += " " + shellEscape(cmd[2])
 
 	// If there are arguments after the string, they are assigned to the positional parameters, starting with $0.
 	for i := 3; i < len(cmd); i++ {
 		// add arguments to sh -c command if any
-		cmdStr += " " + strconv.Quote(cmd[i])
+		cmdStr += " " + shellEscape(cmd[i])
 	}
 
 	return cmdStr, nil

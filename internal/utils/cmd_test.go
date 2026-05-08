@@ -72,7 +72,7 @@ func TestBuildExecCommandString(t *testing.T) {
 				{Name: "FOO", Value: "bar"},
 				{Name: "BAZ", Value: "qux"},
 			},
-			expected:    "export FOO=\"bar\"\nexport BAZ=\"qux\"\nsh -c $'echo Hello'",
+			expected:    "export FOO=\"bar\"\nexport BAZ=\"qux\"\nsh -c 'echo Hello'",
 			expectError: false,
 		},
 		{
@@ -93,14 +93,14 @@ func TestBuildExecCommandString(t *testing.T) {
 			name:        "Command with additional arguments",
 			cmd:         []string{"sh", "-c", "echo Hello", "arg1", "arg2"},
 			env:         []corev1.EnvVar{},
-			expected:    "sh -c $'echo Hello' \"arg1\" \"arg2\"",
+			expected:    "sh -c 'echo Hello' 'arg1' 'arg2'",
 			expectError: false,
 		},
 		{
 			name:        "Command with no additional arguments",
 			cmd:         []string{"sh", "-c", "echo Hello"},
 			env:         []corev1.EnvVar{},
-			expected:    "sh -c $'echo Hello'",
+			expected:    "sh -c 'echo Hello'",
 			expectError: false,
 		},
 	}

@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	vzio "github.com/agoda-com/macOS-vz-kubelet/internal/io"
 	"github.com/agoda-com/macOS-vz-kubelet/internal/utils"
 	"github.com/agoda-com/macOS-vz-kubelet/internal/volumes"
 	"github.com/agoda-com/macOS-vz-kubelet/pkg/event"
@@ -167,9 +168,9 @@ func (c *VzClientAPIs) CreateVirtualizationGroup(ctx context.Context, pod *corev
 			}
 		}
 
-		logDirPath := filepath.Join(c.cachePath, "logs")
+		logDirPath := filepath.Join(extras.rootDir, "logs")
 		_ = os.MkdirAll(logDirPath, 0755)
-		logPath := filepath.Join(logDirPath, fmt.Sprintf("%s_%s_%s.log", pod.Namespace, pod.Name, macOSContainer.Name))
+		logPath := filepath.Join(logDirPath, fmt.Sprintf("%s.log", macOSContainer.Name))
 
 		return c.MacOSClient.CreateVirtualMachine(ctx, rm.VirtualMachineParams{
 			UID:              string(pod.UID),
@@ -460,7 +461,17 @@ func (c *VzClientAPIs) GetContainerLogs(ctx context.Context, namespace, podName,
 		return c.ContainerClient.GetContainerLogs(ctx, namespace, podName, containerName, opts)
 	}
 
-	logPath := filepath.Join(c.cachePath, "logs", fmt.Sprintf("%s_%s_%s.log", namespace, podName, containerName))
+	key := types.NamespacedName{Namespace: namespace, Name: podName}
+	extrasValue, loaded := c.extras.Load(key)
+	if !loaded {
+		return nil, errdefs.NotFound("pod extras not found offline")
+	}
+	extras, ok := extrasValue.(*virtualizationGroupExtras)
+	if !ok {
+		return nil, errdefs.NotFound("pod extras not found correctly structured")
+	}
+
+	logPath := filepath.Join(extras.rootDir, "logs", fmt.Sprintf("%s.log", containerName))
 	f, err := os.Open(logPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -469,7 +480,26 @@ func (c *VzClientAPIs) GetContainerLogs(ctx context.Context, namespace, podName,
 		return nil, err
 	}
 
-	return f, nil
+	isFinished := func() bool {
+		_, loaded := c.extras.Load(key)
+		if !loaded {
+			return true
+		}
+		
+		vm, err := c.MacOSClient.GetVirtualMachine(ctx, namespace, podName)
+		if err == nil {
+			state := vm.State()
+			if state == resource.VirtualMachineStateTerminated || state == resource.VirtualMachineStateFailed {
+				return true
+			}
+			if vm.FinishedAt() != nil {
+				return true
+			}
+		}
+		return false
+	}
+
+	return vzio.NewTailReader(ctx, f, opts, isFinished)
 }
 
 // ExecuteContainerCommand executes a command inside a specified container.
