@@ -1,0 +1,127 @@
+---
+# 1. The NFS Server Pod deployed to a normal Linux node.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: macos-nfs-server
+  namespace: <YOUR_NAMESPACE>
+  labels:
+    app.kubernetes.io/name: macos-nfs-server
+spec:
+  imagePullSecrets:
+  - name: macos-robot-secret
+  restartPolicy: Never
+  securityContext:
+    runAsUser: 1000
+    fsGroup: 1000
+  containers:
+    - name: nfs-server
+      image: <YOUR_NFS_SERVER_IMAGE>
+      env:
+        - name: SHARED_DIRECTORY
+          value: /proj/<YOUR_NAMESPACE>
+      ports:
+        - name: nfs
+          containerPort: 2049
+      volumeMounts:
+        - name: nfs-export
+          mountPath: /proj/<YOUR_NAMESPACE>
+      resources:
+        requests:
+          cpu: "4"
+          memory: "4Gi"
+        limits:
+          cpu: "4"
+          memory: "4Gi"
+  volumes:
+    - name: nfs-export
+      persistentVolumeClaim:
+        claimName: <YOUR_PVC_NAME>
+
+---
+# 2. The Service to expose the NFS Pod
+apiVersion: v1
+kind: Service
+metadata:
+  name: macos-nfs-service
+  namespace: <YOUR_NAMESPACE>
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: macos-nfs-server
+  ports:
+    - port: 2049
+      targetPort: 2049
+      nodePort: 32000
+
+---
+# 3. The Mac OS Job.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vm-benchmark
+  namespace: <YOUR_NAMESPACE>
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      name: vm-benchmark
+      annotations:
+        macos-vz-kubelet/nfs-service: "macos-nfs-service"
+        macos-vz-kubelet/nfs-mount-path: "/proj/<YOUR_NAMESPACE>"
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+      - name: macos-robot-secret
+      containers:
+      - name: macos
+        image: <YOUR_MACOS_IMAGE>
+        imagePullPolicy: IfNotPresent
+        command:
+          - "/bin/sh"
+          - "-c"
+          - |
+            NFS_DIR="/Users/Shared/<YOUR_NAMESPACE>"
+            SCRIPT_DIR="$NFS_DIR/benchmarks"
+            OUTPUT_DIR="$NFS_DIR/results_vm"
+
+            # Note: Do not background this or sleep 3600 afterwards. 
+            # Doing it foreground allows Kubernetes Job controller to mark the job Success/Failed based on the script exit code!
+            bash "$SCRIPT_DIR/run_ai_suite.sh" --runs 1000 --output-dir "$OUTPUT_DIR" --seed 8 2>&1 | tee "$NFS_DIR/benchmark.log"
+
+            # sleep 3600
+            
+        lifecycle:
+          postStart:
+             exec:
+               command:
+                 - "/bin/sh"
+                 - "-c"
+                 - |
+                   NFS_DIR="/Users/Shared/<YOUR_NAMESPACE>"
+
+                   if [ -z "$NFS_SERVER_IP" ] || [ -z "$NFS_NODEPORT" ]; then
+                     echo "FAIL: NFS_SERVER_IP or NFS_NODEPORT not set"
+                     exit 1
+                   fi
+                   
+                   # Just the lightweight mount goes in the hook which guarantees it finishes in under the 10 seconds timeout.
+                   sudo mkdir -p "$NFS_DIR"
+                   sudo mount -t nfs -o vers=3,port="$NFS_NODEPORT",mountport="$NFS_NODEPORT",noresvport,noowners,rw,tcp "$NFS_SERVER_IP":/ "$NFS_DIR"
+
+                   sleep 2
+                   
+        resources:
+          requests:
+            cpu: "10"
+            memory: "12Gi"
+          limits:
+            cpu: "10"
+            memory: "14Gi"
+      tolerations:
+      - key: "virtual-kubelet.io/provider"
+        operator: "Exists"
+        effect: "NoSchedule"
+      nodeSelector:
+        kubernetes.io/os: "darwin"
+

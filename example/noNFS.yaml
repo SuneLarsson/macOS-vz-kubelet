@@ -1,0 +1,36 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vm-no-nfs
+  namespace: <YOUR_NAMESPACE>
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      name: vm-no-nfs
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+      - name: macos-robot-secret
+      containers:
+      - name: macos
+        image: <YOUR_MACOS_IMAGE>
+        imagePullPolicy: IfNotPresent
+        command:
+          - "/bin/sh"
+          - "-c"
+          - |
+            echo "Hello world"        
+        resources:
+          requests:
+            cpu: "10"
+            memory: "12Gi"
+          limits:
+            cpu: "10"
+            memory: "14Gi"
+      tolerations:
+      - key: "virtual-kubelet.io/provider"
+        operator: "Exists"
+        effect: "NoSchedule"
+      nodeSelector:
+        kubernetes.io/os: "darwin"
