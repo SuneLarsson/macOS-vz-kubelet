@@ -109,6 +109,8 @@ We maintain a calculated digest for local image files to guarantee the correctne
 
 - If the digest is missing or if the .img file is newer than the digest file, it indicates that the local cache is invalid, and the image is re-downloaded from the remote OCI registry.
 
+- A digest check is also performed even if `imagePullPolicy: Always` is specified. This matches the behavior in normal Kubernetes environments: every time the kubelet launches a container, it queries the registry to resolve the image digest. If the exact digest is cached locally, it uses the cached image; otherwise, it pulls the new image.
+
 ## Feature Overview
 
 `macOS-vz-kubelet` supports the following Kubernetes features. Features not listed below are currently unsupported.
@@ -137,7 +139,8 @@ We maintain a calculated digest for local image files to guarantee the correctne
 
 | Feature                                  | Supported | Comments                                                                                                                                                                                                          |
 |------------------------------------------|:---------:|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Container logs**                       | ⚠️         | Only for docker containers.                                                                                                                                                                                       |
+| **Container logs**                       | ✅        | Supported for both Docker containers and macOS VMs (when yaml includes commands). Includes support for `-f` (`--follow`), `--tail`, and `--limit-bytes` flags.                                                    |
+| **Commands and args**                    | ✅        | Supported for macOS VMs.                                                                                                                                                                                          |
 | **Container exec**                       | ✅        | `VZ_SSH_USER` and `VZ_SSH_PASSWORD` env variables must be set and correspond to macOS VM ssh user and password in order for exec into macOS containers to work. Exec into the regular container works by default. |
 | **Container attach**                     | ⚠️         | Supported, but not tested.                                                                                                                                                                                        |
 | **Container metrics**                    | ❌        |                                                                                                                                                                                                                   |
@@ -167,6 +170,31 @@ By default, Kubernetes adds a projected volume mount with a service account toke
 | **configMap**             | ✅        |                                                                  |
 | **serviceAccountToken**   | ⚠️         | Supported without rotation. Expires in 3607 seconds by default.  |
 | **clusterTrustBundle**    | ❌        |                                                                  |
+
+### Network Storage (NFS)
+
+While standard Kubernetes Persistent Volumes are not natively supported by the virtual kubelet, `macOS-vz-kubelet` provides built-in service discovery to support in-OS network mounts like NFS. By using a helper sidecar (like `go-nfs`), you can grant your macOS VMs access to cluster-backed storage (such as Ceph or other Persistent Volumes).
+
+To use this feature, add the following annotation to your macOS Pod/Job:
+```yaml
+annotations:
+  macos-vz-kubelet/nfs-service: "<nfs-service-name>"
+```
+
+The virtual kubelet will discover the `NodePort` service and inject `NFS_SERVER_IP` and `NFS_NODEPORT` environment variables into the macOS VM. You can then use a `postStart` lifecycle hook to mount the share:
+```yaml
+lifecycle:
+  postStart:
+    exec:
+      command:
+        - "/bin/zsh"
+        - "-c"
+        - |
+          sudo mkdir -p /Users/Shared/nfs
+          sudo mount -t nfs -o vers=3,port="$NFS_NODEPORT",mountport="$NFS_NODEPORT",noresvport,noowners,rw,tcp "$NFS_SERVER_IP":/ /Users/Shared/nfs
+```
+
+A complete working example utilizing a `go-nfs` sidecar pod is available in [example/macjob.yaml](example/macjob.yaml) and [example/go-sidecar](example/go-sidecar).
 
 ## Usage Guide
 
@@ -223,23 +251,27 @@ All flags listed below are optional.
 
    Use tools compliant with Apple's Virtualization framework (e.g., [macosvm](https://github.com/s-u/macosvm)) to create a base macOS VM image.
 
-1. **Package the Image**
+2. **Customize the Image (buildimage)**
 
-   Package the VM image into the custom OCI format and push it to the registry using our fork of oras [oras-macos-vz](https://github.com/agoda-com/oras-macos-vz).
+   Use the automated build script found in the `buildimage/` folder. This script takes your base image and installs required packages via `brew` and `pip` as defined in `config.env`. For more details, see [DEVELOPER_NOTES.md](DEVELOPER_NOTES.md).
+
+3. **Package the Image**
+
+   Package the customized VM image into the custom OCI format and push it to the registry using our fork of oras [oras-macos-vz](https://github.com/agoda-com/oras-macos-vz).
 
    ```shell
    oras-macos-vz push -h
    ```
 
-1. **Prepare Kubernetes Pod Manifest**
+4. **Prepare Kubernetes Pod Manifest**
 
    Write a Kubernetes Pod manifest that references the OCI image. See the [examples](example) folder for a sample manifest.
 
-1. **Run the Pod**
+5. **Run the Pod**
 
    Virtual Kubelet will pick up your workload, download the image, and start the macOS VM. Status is reported back to Kubernetes as if it’s a regular container.
 
-1. **Interact with the Pod**
+6. **Interact with the Pod**
 
    Use kubectl exec to interact with the macOS VM or other containers in the Pod.
 
@@ -251,9 +283,11 @@ The cache directory will be `~/Library/Caches/com.thesis.virtualization`. Cache 
 
 Check the [examples](example) folder for:
 
-- Sample Pod manifests.
 
-- Example workloads, including hybrid Pods with macOS VMs and Docker side-cars.
+- **`fioStorageTestVM.yaml`**: Runs an FIO storage benchmark against an NFS mount to test sequential and random read/write performance.
+- **`logTesting.yaml`**: A simple job that outputs logs in a continuous loop to test log streaming and retrieval from the macOS VM.
+- **`noNFS.yaml`**: A minimal macOS VM job that does not mount an NFS share, useful for testing the basic VM lifecycle and connectivity.
+- **`benchmarkVM.yaml`**: A placeholder manifest intended for custom VM benchmarking workloads.
 
 ## Roadmap
 
